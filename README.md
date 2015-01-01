@@ -9,7 +9,7 @@ Compiling
 
 telnet-irc depends on
  * A UNIX-based operating system
- * libevent
+ * `libevent-dev` (at least on Debian-based distros)
 
 To compile in regular mode, type `make; make install`
 
