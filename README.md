@@ -7,6 +7,10 @@ respond to IRC `PING` requests to avoid dropping connection.
 Compiling
 =========
 
+telnet-irc depends on
+ * A UNIX-based operating system
+ * libevent
+
 To compile in regular mode, type `make; make install`
 
 To compile in debug mode, type `make DEBUG=1; make install`
