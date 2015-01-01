@@ -21,8 +21,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define DEBUG 0
-
 char* getIPFromHost(const char* name);
 void printUsage(char* binary);
 int processPing(const char* data);

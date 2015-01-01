@@ -1,5 +1,6 @@
 CC	:= cc
 CFLAGS	:= -std=c11 -Wall -Wextra -pedantic
+DEBUG	:= 0
 LIBS	:= -levent
 PREFIX	:= /usr/local
 
@@ -17,4 +18,4 @@ install: telnet-irc
 
 telnet-irc:
 	@echo "Compiling telnet-irc.c ..."
-	@$(CC) $(CFLAGS) -o telnet-irc telnet-irc.c $(LIBS)
+	@$(CC) $(CFLAGS) -o telnet-irc telnet-irc.c -DDEBUG=$(DEBUG) $(LIBS)
