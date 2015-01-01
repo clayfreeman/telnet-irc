@@ -16,8 +16,7 @@ Usage
 
 `telnet-irc <host> [port]`
 
-Examples
-========
+###Examples
  * `telnet-irc irc.freenode.net`
  * `telnet-irc irc.example.org 6669`
 
