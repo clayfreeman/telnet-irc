@@ -31,3 +31,11 @@ Usage
 ###Examples
  * `telnet-irc irc.freenode.net`
  * `telnet-irc irc.example.org 6669`
+
+Plans
+=====
+
+Upcoming plans for this utility include:
+
+ * Automatic registration (will use nick/ident from command-line)
+ * SSL support (will use an alternate SSL enabled telnet; ex. gnutls-cli)
