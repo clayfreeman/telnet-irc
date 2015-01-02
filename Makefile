@@ -17,7 +17,7 @@ clean:
 install: telnet-irc
 	@echo "Installing telnet-irc to $(PREFIX)/bin ..."
 	@mkdir -p $(PREFIX)/bin
-	@install -m 0755 telnet-irc $(PREFIX)/bin
+	@install -m 0755 telnet-irc $(PREFIX)/bin/telnet-irc
 
 telnet-irc:
 	@echo "Compiling telnet-irc.c ..."
