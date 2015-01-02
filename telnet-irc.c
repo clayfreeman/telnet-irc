@@ -141,11 +141,12 @@ int main(int argc, char** argv) {
  *   Variables are hardcoded; this function must be updated for new globals
  */
 void clean() {
+  if (base != NULL) event_base_loopbreak(base); // Prevent event errors
   // Free memory
   if (addr != NULL) free(addr);
   if (pipeEvent != NULL) { event_del(pipeEvent); event_free(pipeEvent); }
   if (stdinEvent != NULL) { event_del(stdinEvent); event_free(stdinEvent); }
-  if (base != NULL) { event_base_loopbreak(base); event_base_free(base); }
+  if (base != NULL) event_base_free(base);
   // Null pointers
   addr = NULL;
   pipeEvent = NULL;
@@ -189,6 +190,8 @@ void handleSignals(int sig) {
     printf("\b\b\r");
   }
   if (DEBUG == 1) printf("DEBUG: Caught signal: %i\n", sig);
+  // Clean storage
+  clean();
   // Close pipes
   close(rpipe[0]);
   close(rpipe[1]);
@@ -196,8 +199,6 @@ void handleSignals(int sig) {
   close(wpipe[1]);
   // Wait for child
   waitpid((pid_t)(-1), 0, WNOHANG);
-  // Clean storage
-  clean();
   // Exit
   exit(0);
 }
