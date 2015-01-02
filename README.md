@@ -17,6 +17,8 @@ To compile in regular mode, type `make; make install`
 
 To compile in debug mode, type `make DEBUG=1; make install`
 
+To install to a different prefix, `make; make install PREFIX=/path/to/prefix`
+
 If for some reason you don't have the `which` command and your telnet isn't
 located at `/usr/bin/telnet`, you can compile with
 `make TELNET=/path/to/telnet; make install`
