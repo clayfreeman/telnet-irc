@@ -151,17 +151,17 @@ void printUsage(char* binary) {
 }
 
 /**
-* @brief Process Ping
-*
-* Detect if a PING request was sent by the peer
-*
-* @remarks
-*   This function expects the request command to be capitalized
-*
-* @param data The string of data to check for a PING request
-*
-* @return 0 if no request was found, 1 if a request was found
-*/
+ * @brief Process Ping
+ *
+ * Detect if a PING request was sent by the peer
+ *
+ * @remarks
+ *   This function expects the request command to be capitalized
+ *
+ * @param data The string of data to check for a PING request
+ *
+ * @return 0 if no request was found, 1 if a request was found
+ */
 int processPing(const char* data) {
   int retVal = 0;
   // Test if "PING" is present
