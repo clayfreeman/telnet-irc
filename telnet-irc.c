@@ -21,7 +21,7 @@
 
 void clean();
 char* getIPFromHost(const char* name);
-void handleSIGCHLD(int sig);
+void handleSignals(int sig);
 void printUsage(const char* binary);
 int processPing(const char* data);
 static void pipeEventCallback(int fd, short events, void* ptr);
@@ -77,8 +77,12 @@ int main(int argc, char** argv) {
         // Setup pipe
         pipe(rpipe);
         pipe(wpipe);
-        // Setup signal handler
-        if (signal(SIGCHLD, handleSIGCHLD) == SIG_ERR) {
+        // Setup signal handlers
+        if (signal(SIGCHLD, handleSignals) == SIG_ERR) {
+          clean();
+          exit(1);
+        }
+        if (signal(SIGINT, handleSignals) == SIG_ERR) {
           clean();
           exit(1);
         }
@@ -137,10 +141,12 @@ int main(int argc, char** argv) {
  *   Variables are hardcoded; this function must be updated for new globals
  */
 void clean() {
+  // Free memory
   if (addr != NULL) free(addr);
   if (pipeEvent != NULL) { event_del(pipeEvent); event_free(pipeEvent); }
   if (stdinEvent != NULL) { event_del(stdinEvent); event_free(stdinEvent); }
   if (base != NULL) { event_base_loopbreak(base); event_base_free(base); }
+  // Null pointers
   addr = NULL;
   pipeEvent = NULL;
   stdinEvent = NULL;
@@ -171,19 +177,25 @@ char* getIPFromHost(const char* name) {
 }
 
 /**
- * @brief Handle SIGCHLD
+ * @brief Handle Signals
  *
- * Handles any SIGCHLD signal, cleans up memory, and exits
+ * Handles any registered signal, cleans up memory, and exits
  *
  * @param sig The signal that was received
  */
-void handleSIGCHLD(int sig) {
-  if (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {
-    // Prevent warning about unused parameter
-    sig = 0 * sig;
-    clean();
-    exit(0);
-  }
+void handleSignals(int sig) {
+  if (DEBUG == 1) printf("DEBUG: Caught signal: %i\n", sig);
+  // Close pipes
+  close(rpipe[0]);
+  close(rpipe[1]);
+  close(wpipe[0]);
+  close(wpipe[1]);
+  // Wait for child
+  waitpid((pid_t)(-1), 0, WNOHANG);
+  // Clean storage
+  clean();
+  // Exit
+  exit(0);
 }
 
 /**
