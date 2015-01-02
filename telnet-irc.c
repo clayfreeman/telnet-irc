@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
   // Setup required storage
   char* addr_ptr = NULL;
   int port = 6667;
+  char pstr[6];
   int status = -1;
 
   // Make sure we have at least a hostname
@@ -75,7 +76,6 @@ int main(int argc, char** argv) {
         if (DEBUG == 1) printf("DEBUG: IP: %s\n", addr);
 
         // Prepare port as string
-        char pstr[6];
         sprintf(pstr, "%i", port);
 
         // Setup signal handlers
@@ -231,6 +231,8 @@ void printUsage(const char* binary) {
  * @return 0 if no request was found, 1 if a request was found
  */
 int processPing(const char* data) {
+  char* buffer = NULL;
+  char* source = NULL;
   int retVal = 0;
   // Test if "PING" is present
   if (strstr(data, "PING")) {
@@ -238,8 +240,7 @@ int processPing(const char* data) {
     retVal = 1;
 
     // Allocate memory
-    char* buffer = NULL;
-    char* source = calloc(strlen(data), sizeof(char));
+    source = calloc(strlen(data), sizeof(char));
     // Grab PING request's source
     sscanf(data, "PING %s\n", source);
     // Allocate buffer space (PONG, space, \n, and null-terminator)
@@ -269,9 +270,10 @@ int processPing(const char* data) {
  */
 static void pipeEventCallback(int fd, short events, void* ptr) {
   int count;
+  char* data = NULL;
   ioctl(fd, FIONREAD, &count);
   while (count > 0) {
-    char* data = calloc(1025, sizeof(char));
+    data = calloc(1025, sizeof(char));
     read(fd, data, 1024);
     if (!processPing(data)) {
       printf("%s", data);
@@ -326,9 +328,10 @@ void startEvents() {
  */
 static void stdinEventCallback(int fd, short events, void* ptr) {
   int count;
+  char* data = NULL;
   ioctl(fd, FIONREAD, &count);
   while (count > 0) {
-    char* data = calloc(1025, sizeof(char));
+    data = calloc(1025, sizeof(char));
     read(fd, data, 1024);
     // printf("%s", data);
     write(wpipe[1], data, strlen(data));
