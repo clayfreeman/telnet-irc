@@ -9,26 +9,31 @@
  */
 
 #include <arpa/inet.h>
-#include <ctype.h>
-#include <errno.h>
 #include <event2/event.h>
-#include <fcntl.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
+void clean();
 char* getIPFromHost(const char* name);
+void handleSIGCHLD(int sig);
 void printUsage(char* binary);
 int processPing(const char* data);
-static void socketEventCallback(int fd, short events, void* ptr);
+static void pipeEventCallback(int fd, short events, void* ptr);
 void startEvents();
 static void stdinEventCallback(int fd, short events, void* ptr);
 
-int sock;
+// Setup required global storage
+struct event_base* base = NULL;
+char* addr = NULL;
+pid_t pid = 0;
+int rpipe[2], wpipe[2];
+struct event* pipeEvent = NULL;
+struct event* stdinEvent = NULL;
 struct timeval timeout;
 
 int main(int argc, char** argv) {
@@ -36,66 +41,70 @@ int main(int argc, char** argv) {
   timeout.tv_sec = 0;
   timeout.tv_usec = 1;
 
-  // Assume error status until all checks are cleared
+  // Setup required storage
+  char* addr_ptr = NULL;
+  int port = 6667;
   int status = -1;
-  // Make sure we have a hostname and port
+
+  // Make sure we have at least a hostname
   if (argc > 1) {
-    // Set status to normal; checks were passed
-    // status = 0;
-
-    // Setup storage necessary to make a connection
-    int port = 6667;
-
     // Check if a non-default port was provided
     if (argc > 2) {
       port = atoi(argv[2]);
       if (DEBUG == 1) printf("DEBUG: Parsed non-default port as %i\n", port);
     }
 
-    if (port != 0) {
+    if (port > 0 && port < 65536) {
       // Print provided parameters
-      if (DEBUG == 1) printf("DEBUG: %s %i\n", argv[1], port);
+      if (DEBUG == 1) printf("DEBUG: Got args: %s %i\n", argv[1], port);
 
       // Get the IP address for the given hostname
-      char* addr_ptr = getIPFromHost(argv[1]);
+      addr_ptr = getIPFromHost(argv[1]);
       if (addr_ptr != NULL) {
         // Copy the address safely from static storage
-        char* addr = calloc(strlen(addr_ptr) + 1, sizeof(char));
+        addr = calloc(strlen(addr_ptr) + 1, sizeof(char));
         memcpy(addr, addr_ptr, strlen(addr_ptr));
-        addr_ptr = 0;
+        addr_ptr = NULL;
 
         // Print the resolved address
-        if (DEBUG == 1) printf("DEBUG: %s\n", addr);
+        if (DEBUG == 1) printf("DEBUG: IP: %s\n", addr);
 
-        // Attempt to connect to the host
-        sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock >= 0) {
-          struct sockaddr_in serv_addr;
-          // Zero the memory for serv_addr
-          memset((char*)&serv_addr, 0, sizeof(serv_addr));
-          // Setup required properties
-          serv_addr.sin_family = AF_INET;
-          serv_addr.sin_addr.s_addr = inet_addr(addr);
-          serv_addr.sin_port = htons(port);
-          printf("Trying %s...\n", addr);
-          int s = connect(sock, (struct sockaddr*)&serv_addr,
-            sizeof(serv_addr));
-          if (s >= 0) {
-            // We connected!
-            status = 0;
-            startEvents();
-          }
-          else {
-            printf("Error: Could not connect to host\n");
-          }
+        // Prepare port as string
+        char pstr[6];
+        sprintf(pstr, "%i", port);
+
+        // Setup pipe
+        pipe(rpipe);
+        pipe(wpipe);
+        // Setup signal handler
+        if (signal(SIGCHLD, handleSIGCHLD) == SIG_ERR) {
+          clean();
+          exit(1);
+        }
+        // Fork and exec
+        pid = fork();
+        if (pid == 0) {
+          // Prepare pipes
+          close(rpipe[0]);
+          close(wpipe[1]);
+          dup2(rpipe[1], STDOUT_FILENO);
+          dup2(wpipe[0], STDIN_FILENO);
+          close(rpipe[1]);
+          close(wpipe[0]);
+
+          // Run command
+          execl(TELNET, TELNET, addr, pstr, NULL);
+
+          // Exit if something goes wrong
+          exit(1);
         }
         else {
-          printf("Error: Could not create socket\n");
-        }
+          // Prepare pipes
+          close(rpipe[1]);
+          close(wpipe[0]);
 
-        // Clean up our address
-        free(addr);
-        addr = 0;
+          startEvents();
+        }
       }
       else {
         printf("Error: Could not resolve provided host\n");
@@ -110,8 +119,32 @@ int main(int argc, char** argv) {
     printf("Error: No host provided\n\n");
     printUsage(argv[0]);
   }
+
+  // Clean up our pointers
+  clean();
+
   // Return the exit status
   return status;
+}
+
+/**
+ * @brief Clean
+ *
+ * Frees global pointers and nulls them
+ *
+ * @remarks
+ *   Variables are hardcoded; this function must be updated for new globals
+ */
+void clean() {
+  if (pipeEvent != NULL) event_free(pipeEvent);
+  if (stdinEvent != NULL) event_free(stdinEvent);
+  if (base != NULL) event_base_free(base);
+  if (addr != NULL) free(addr);
+  pipeEvent = NULL;
+  stdinEvent = NULL;
+  base = NULL;
+  addr = NULL;
+  if (DEBUG == 1) printf("DEBUG: All clean!\n");
 }
 
 /**
@@ -134,6 +167,22 @@ char* getIPFromHost(const char* name) {
     retVal = inet_ntoa(*(struct in_addr*)host->h_addr_list[0]);
   }
   return retVal;
+}
+
+/**
+ * @brief Handle SIGCHLD
+ *
+ * Handles any SIGCHLD signal, cleans up memory, and exits
+ *
+ * @param sig The signal that was received
+ */
+void handleSIGCHLD(int sig) {
+  if (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {
+    // Prevent warning about unused parameter
+    sig = 0 * sig;
+    clean();
+    exit(0);
+  }
 }
 
 /**
@@ -179,27 +228,27 @@ int processPing(const char* data) {
     // Format buffer with reply
     sprintf(buffer, "PONG %s\n", source);
     // Send reply
-    write(sock, buffer, strlen(buffer));
+    write(wpipe[1], buffer, strlen(buffer));
     if (DEBUG == 1) printf("DEBUG: %sDEBUG: %s", data, buffer);
     // Clean up memory
     free(buffer);
     free(source);
-    buffer = 0;
-    source = 0;
+    buffer = NULL;
+    source = NULL;
   }
   return retVal;
 }
 
 /**
- * @brief Socket Event Callback
+ * @brief Pipe Event Callback
  *
  * A callback for when there is data to read on the connection created at setup
  *
- * @param fd     File descriptor for the socket
+ * @param fd     File descriptor for the stream
  * @param events A series of flags that are useless to this function
  * @param ptr    Pointer to an optional parameter (not used)
  */
-static void socketEventCallback(int fd, short events, void* ptr) {
+static void pipeEventCallback(int fd, short events, void* ptr) {
   int count;
   ioctl(fd, FIONREAD, &count);
   while (count > 0) {
@@ -212,18 +261,20 @@ static void socketEventCallback(int fd, short events, void* ptr) {
       if (DEBUG == 1) printf("DEBUG: Automatically responded to PING\n");
     }
     free(data);
-    data = 0;
+    data = NULL;
     ioctl(fd, FIONREAD, &count);
   }
 
-  events = 0;
-  ptr = 0;
+  // To prevent unused parameter warnings
+  events = 0 / events;
+  ptr = NULL;
+  ptr = (void*)((char*)ptr + 0);
 }
 
 /**
  * @brief Start Events
  *
- * Responsible for starting the events associated with reading stdin and sock
+ * Responsible for starting the events associated with reading stdin and pipefd
  *
  * @remarks
  * Probably won't ever reach the "Free memory" section, but it can remain
@@ -231,30 +282,22 @@ static void socketEventCallback(int fd, short events, void* ptr) {
  */
 void startEvents() {
   // Prepare the base
-  struct event_base* base = event_base_new();
+  base = event_base_new();
 
-  // Prepare socket event
-  struct event* socketEvent = event_new(base, sock, EV_TIMEOUT | EV_PERSIST |
-    EV_READ, socketEventCallback, base);
-  event_base_set(base, socketEvent);
-  event_add(socketEvent, &timeout);
+  // Prepare pipe event
+  pipeEvent = event_new(base, rpipe[0], EV_PERSIST | EV_READ,
+    pipeEventCallback, base);
+  event_base_set(base, pipeEvent);
+  event_add(pipeEvent, &timeout);
 
   // Prepare stdin event
-  struct event* stdinEvent = event_new(base, fileno(stdin), EV_TIMEOUT |
-    EV_PERSIST | EV_READ, stdinEventCallback, base);
+  stdinEvent = event_new(base, STDOUT_FILENO, EV_PERSIST | EV_READ,
+    stdinEventCallback, base);
   event_base_set(base, stdinEvent);
   event_add(stdinEvent, &timeout);
 
   // Start events
   event_base_loop(base, 0x04);
-
-  // Free memory
-  event_free(socketEvent);
-  event_free(stdinEvent);
-  event_base_free(base);
-  socketEvent = 0;
-  stdinEvent = 0;
-  base = 0;
 }
 
 /**
@@ -262,7 +305,7 @@ void startEvents() {
  *
  * A callback for when there is data to read on stdin
  *
- * @param fd     File descriptor for the socket
+ * @param fd     File descriptor for the stream
  * @param events A series of flags that are useless to this function
  * @param ptr    Pointer to an optional parameter (not used)
  */
@@ -272,12 +315,15 @@ static void stdinEventCallback(int fd, short events, void* ptr) {
   while (count > 0) {
     char* data = calloc(1025, sizeof(char));
     read(fd, data, 1024);
-    write(sock, data, strlen(data));
+    // printf("%s", data);
+    write(wpipe[1], data, strlen(data));
     free(data);
-    data = 0;
+    data = NULL;
     ioctl(fd, FIONREAD, &count);
   }
 
-  events = 0;
-  ptr = 0;
+  // To prevent unused parameter warnings
+  events = 0 / events;
+  ptr = NULL;
+  ptr = (void*)((char*)ptr + 0);
 }
