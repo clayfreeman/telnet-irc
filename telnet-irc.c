@@ -10,6 +10,7 @@
 
 #include <arpa/inet.h>
 #include <event2/event.h>
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +22,7 @@
 void clean();
 char* getIPFromHost(const char* name);
 void handleSIGCHLD(int sig);
-void printUsage(char* binary);
+void printUsage(const char* binary);
 int processPing(const char* data);
 static void pipeEventCallback(int fd, short events, void* ptr);
 void startEvents();
@@ -93,7 +94,7 @@ int main(int argc, char** argv) {
           close(wpipe[0]);
 
           // Run command
-          execl(TELNET, TELNET, addr, pstr, NULL);
+          execl(TELNET, basename(TELNET), addr, pstr, NULL);
 
           // Exit if something goes wrong
           exit(1);
@@ -136,14 +137,14 @@ int main(int argc, char** argv) {
  *   Variables are hardcoded; this function must be updated for new globals
  */
 void clean() {
-  if (pipeEvent != NULL) event_free(pipeEvent);
-  if (stdinEvent != NULL) event_free(stdinEvent);
-  if (base != NULL) event_base_free(base);
   if (addr != NULL) free(addr);
+  if (pipeEvent != NULL) { event_del(pipeEvent); event_free(pipeEvent); }
+  if (stdinEvent != NULL) { event_del(stdinEvent); event_free(stdinEvent); }
+  if (base != NULL) { event_base_loopbreak(base); event_base_free(base); }
+  addr = NULL;
   pipeEvent = NULL;
   stdinEvent = NULL;
   base = NULL;
-  addr = NULL;
   if (DEBUG == 1) printf("DEBUG: All clean!\n");
 }
 
@@ -192,7 +193,7 @@ void handleSIGCHLD(int sig) {
  *
  * @param binary Preferably argv[0], but "telnet-irc" would suffice
  */
-void printUsage(char* binary) {
+void printUsage(const char* binary) {
   printf("Usage: %s <host> [port]\n", binary);
   printf("Examples:\n");
   printf("  %s irc.freenode.net\n", binary);
@@ -275,10 +276,6 @@ static void pipeEventCallback(int fd, short events, void* ptr) {
  * @brief Start Events
  *
  * Responsible for starting the events associated with reading stdin and pipefd
- *
- * @remarks
- * Probably won't ever reach the "Free memory" section, but it can remain
- *   there for posterity
  */
 void startEvents() {
   // Prepare the base
