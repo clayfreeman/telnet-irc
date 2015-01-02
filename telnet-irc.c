@@ -42,6 +42,10 @@ int main(int argc, char** argv) {
   timeout.tv_sec = 0;
   timeout.tv_usec = 1;
 
+  // Setup pipes
+  pipe(rpipe);
+  pipe(wpipe);
+
   // Setup required storage
   char* addr_ptr = NULL;
   int port = 6667;
@@ -74,9 +78,6 @@ int main(int argc, char** argv) {
         char pstr[6];
         sprintf(pstr, "%i", port);
 
-        // Setup pipe
-        pipe(rpipe);
-        pipe(wpipe);
         // Setup signal handlers
         if (signal(SIGCHLD, handleSignals) == SIG_ERR) {
           clean();
@@ -152,6 +153,13 @@ void clean() {
   pipeEvent = NULL;
   stdinEvent = NULL;
   base = NULL;
+  // Close pipes
+  close(rpipe[0]);
+  close(rpipe[1]);
+  close(wpipe[0]);
+  close(wpipe[1]);
+  // Wait for child
+  waitpid((pid_t)(-1), 0, WNOHANG);
   if (DEBUG == 1) printf("DEBUG: All clean!\n");
 }
 
@@ -192,13 +200,6 @@ void handleSignals(int sig) {
   if (DEBUG == 1) printf("DEBUG: Caught signal: %i\n", sig);
   // Clean storage
   clean();
-  // Close pipes
-  close(rpipe[0]);
-  close(rpipe[1]);
-  close(wpipe[0]);
-  close(wpipe[1]);
-  // Wait for child
-  waitpid((pid_t)(-1), 0, WNOHANG);
   // Exit
   exit(0);
 }
