@@ -184,6 +184,10 @@ char* getIPFromHost(const char* name) {
  * @param sig The signal that was received
  */
 void handleSignals(int sig) {
+  if (sig == SIGINT) {
+    // Try to hide ^C
+    printf("\b\b\r");
+  }
   if (DEBUG == 1) printf("DEBUG: Caught signal: %i\n", sig);
   // Close pipes
   close(rpipe[0]);
