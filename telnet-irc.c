@@ -79,37 +79,32 @@ int main(int argc, char** argv) {
         sprintf(pstr, "%i", port);
 
         // Setup signal handlers
-        if (signal(SIGCHLD, handleSignals) == SIG_ERR) {
-          clean();
-          exit(1);
-        }
-        if (signal(SIGINT, handleSignals) == SIG_ERR) {
-          clean();
-          exit(1);
-        }
-        // Fork and exec
-        pid = fork();
-        if (pid == 0) {
-          // Prepare pipes
-          close(rpipe[0]);
-          close(wpipe[1]);
-          dup2(rpipe[1], STDOUT_FILENO);
-          dup2(wpipe[0], STDIN_FILENO);
-          close(rpipe[1]);
-          close(wpipe[0]);
+        if (signal(SIGCHLD, handleSignals) != SIG_ERR &&
+            signal(SIGINT, handleSignals) != SIG_ERR) {
+          // Fork and exec
+          pid = fork();
+          if (pid == 0) {
+            // Prepare pipes
+            close(rpipe[0]);
+            close(wpipe[1]);
+            dup2(rpipe[1], STDOUT_FILENO);
+            dup2(wpipe[0], STDIN_FILENO);
+            close(rpipe[1]);
+            close(wpipe[0]);
 
-          // Run command
-          execl(TELNET, basename(TELNET), addr, pstr, NULL);
+            // Run command
+            execl(TELNET, basename(TELNET), addr, pstr, NULL);
 
-          // Exit if something goes wrong
-          exit(1);
-        }
-        else {
-          // Prepare pipes
-          close(rpipe[1]);
-          close(wpipe[0]);
+            // Exit if something goes wrong
+            exit(1);
+          }
+          else {
+            // Prepare pipes
+            close(rpipe[1]);
+            close(wpipe[0]);
 
-          startEvents();
+            startEvents();
+          }
         }
       }
       else {
@@ -129,6 +124,8 @@ int main(int argc, char** argv) {
   // Clean up our pointers
   clean();
 
+  if (DEBUG == 1) printf("DEBUG: Exiting from main()\n");
+
   // Return the exit status
   return status;
 }
@@ -142,7 +139,7 @@ int main(int argc, char** argv) {
  *   Variables are hardcoded; this function must be updated for new globals
  */
 void clean() {
-  if (base != NULL) event_base_loopbreak(base); // Prevent event errors
+  if (base != NULL) event_base_loopbreak(base);
   // Free memory
   if (addr != NULL) free(addr);
   if (pipeEvent != NULL) { event_del(pipeEvent); event_free(pipeEvent); }
@@ -188,7 +185,7 @@ char* getIPFromHost(const char* name) {
 /**
  * @brief Handle Signals
  *
- * Handles any registered signal, cleans up memory, and exits
+ * Handles any registered signal
  *
  * @param sig The signal that was received
  */
@@ -198,10 +195,8 @@ void handleSignals(int sig) {
     printf("\b\b\r");
   }
   if (DEBUG == 1) printf("DEBUG: Caught signal: %i\n", sig);
-  // Clean storage
-  clean();
-  // Exit
-  exit(0);
+  // Close the event loop
+  if (base != NULL) event_base_loopbreak(base);
 }
 
 /**
