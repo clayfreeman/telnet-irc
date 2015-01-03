@@ -1,7 +1,8 @@
 CC	:= cc
 CFLAGS	:= -std=c11 -Wall -Wextra -pedantic
 DEBUG	:= 0
-TELNET	:= $(shell which telnet 2>/dev/null || echo /usr/bin/telnet)
+DTELNET	:= /usr/bin/telnet
+TELNET	:= $(shell which telnet 2>/dev/null || echo $(DTELNET))
 FLAGS	:= -DDEBUG=$(DEBUG) -DTELNET=\"$(TELNET)\"
 LIBS	:= -levent
 PREFIX	:= /usr/local

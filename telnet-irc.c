@@ -19,7 +19,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-void clean();
 char* getIPFromHost(const char* name);
 void handleSignals(int sig);
 void printUsage(const char* binary);
@@ -30,24 +29,13 @@ static void stdinEventCallback(int fd, short events, void* ptr);
 
 // Setup required global storage
 struct event_base* base = NULL;
-char* addr = NULL;
-pid_t pid = 0;
-int rpipe[2], wpipe[2];
-struct event* pipeEvent = NULL;
-struct event* stdinEvent = NULL;
-struct timeval timeout;
+int rwpipe[2];
 
 int main(int argc, char** argv) {
-  // Prepare the timeout global variable
-  timeout.tv_sec = 0;
-  timeout.tv_usec = 1;
-
-  // Setup pipes
-  pipe(rpipe);
-  pipe(wpipe);
-
   // Setup required storage
+  char* addr = NULL;
   char* addr_ptr = NULL;
+  pid_t pid = 0;
   int port = 6667;
   char pstr[6];
   int status = -1;
@@ -81,6 +69,11 @@ int main(int argc, char** argv) {
         // Setup signal handlers
         if (signal(SIGCHLD, handleSignals) != SIG_ERR &&
             signal(SIGINT, handleSignals) != SIG_ERR) {
+          // Setup pipes
+          int rpipe[2], wpipe[2];
+          pipe(rpipe);
+          pipe(wpipe);
+
           // Fork and exec
           pid = fork();
           if (pid == 0) {
@@ -96,15 +89,24 @@ int main(int argc, char** argv) {
             execl(TELNET, basename(TELNET), addr, pstr, NULL);
 
             // Exit if something goes wrong
-            exit(1);
+            _exit(1);
           }
           else {
             // Prepare pipes
             close(rpipe[1]);
             close(wpipe[0]);
+            rwpipe[0] = rpipe[0];
+            rwpipe[1] = wpipe[1];
 
             startEvents();
           }
+
+          free(addr);
+          addr = NULL;
+
+          // Close pipes
+          close(rwpipe[0]);
+          close(rwpipe[1]);
         }
       }
       else {
@@ -121,43 +123,13 @@ int main(int argc, char** argv) {
     printUsage(argv[0]);
   }
 
-  // Clean up our pointers
-  clean();
+  // Wait for children
+  waitpid((pid_t)(-1), 0, WNOHANG);
 
   if (DEBUG == 1) printf("DEBUG: Exiting from main()\n");
 
   // Return the exit status
   return status;
-}
-
-/**
- * @brief Clean
- *
- * Frees global pointers and nulls them
- *
- * @remarks
- *   Variables are hardcoded; this function must be updated for new globals
- */
-void clean() {
-  if (base != NULL) event_base_loopbreak(base);
-  // Free memory
-  if (addr != NULL) free(addr);
-  if (pipeEvent != NULL) { event_del(pipeEvent); event_free(pipeEvent); }
-  if (stdinEvent != NULL) { event_del(stdinEvent); event_free(stdinEvent); }
-  if (base != NULL) event_base_free(base);
-  // Null pointers
-  addr = NULL;
-  pipeEvent = NULL;
-  stdinEvent = NULL;
-  base = NULL;
-  // Close pipes
-  close(rpipe[0]);
-  close(rpipe[1]);
-  close(wpipe[0]);
-  close(wpipe[1]);
-  // Wait for child
-  waitpid((pid_t)(-1), 0, WNOHANG);
-  if (DEBUG == 1) printf("DEBUG: All clean!\n");
 }
 
 /**
@@ -243,7 +215,7 @@ int processPing(const char* data) {
     // Format buffer with reply
     sprintf(buffer, "PONG %s\n", source);
     // Send reply
-    write(wpipe[1], buffer, strlen(buffer));
+    write(rwpipe[1], buffer, strlen(buffer));
     if (DEBUG == 1) printf("DEBUG: %sDEBUG: %s", data, buffer);
     // Clean up memory
     free(buffer);
@@ -293,23 +265,38 @@ static void pipeEventCallback(int fd, short events, void* ptr) {
  * Responsible for starting the events associated with reading stdin and pipefd
  */
 void startEvents() {
+  // Prepare the timeout variable
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = 1;
+
   // Prepare the base
   base = event_base_new();
 
   // Prepare pipe event
-  pipeEvent = event_new(base, rpipe[0], EV_PERSIST | EV_READ,
+  struct event* pipeEvent = event_new(base, rwpipe[0], EV_PERSIST | EV_READ,
     pipeEventCallback, base);
   event_base_set(base, pipeEvent);
   event_add(pipeEvent, &timeout);
 
   // Prepare stdin event
-  stdinEvent = event_new(base, STDOUT_FILENO, EV_PERSIST | EV_READ,
-    stdinEventCallback, base);
+  struct event* stdinEvent = event_new(base, STDOUT_FILENO, EV_PERSIST |
+    EV_READ, stdinEventCallback, base);
   event_base_set(base, stdinEvent);
   event_add(stdinEvent, &timeout);
 
   // Start events
   event_base_loop(base, 0x04);
+
+  // Clean up events
+  event_del(pipeEvent);
+  event_free(pipeEvent);
+  event_del(stdinEvent);
+  event_free(stdinEvent);
+  event_base_free(base);
+  pipeEvent = NULL;
+  stdinEvent = NULL;
+  base = NULL;
 }
 
 /**
@@ -329,7 +316,7 @@ static void stdinEventCallback(int fd, short events, void* ptr) {
     data = calloc(1025, sizeof(char));
     read(fd, data, 1024);
     // printf("%s", data);
-    write(wpipe[1], data, strlen(data));
+    write(rwpipe[1], data, strlen(data));
     free(data);
     data = NULL;
     ioctl(fd, FIONREAD, &count);
