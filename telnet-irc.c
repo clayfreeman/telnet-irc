@@ -32,6 +32,8 @@ struct event_base* base = NULL;
 int rwpipe[2];
 
 int main(int argc, char** argv) {
+  // Disable buffering
+  setbuf(stdout, NULL);
   // Setup required storage
   char* addr = NULL;
   char* addr_ptr = NULL;
