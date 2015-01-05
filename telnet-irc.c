@@ -282,7 +282,7 @@ void startEvents() {
   event_add(pipeEvent, &timeout);
 
   // Prepare stdin event
-  struct event* stdinEvent = event_new(base, STDOUT_FILENO, EV_PERSIST |
+  struct event* stdinEvent = event_new(base, STDIN_FILENO, EV_PERSIST |
     EV_READ, stdinEventCallback, base);
   event_base_set(base, stdinEvent);
   event_add(stdinEvent, &timeout);
