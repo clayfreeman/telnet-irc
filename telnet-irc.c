@@ -268,7 +268,7 @@ void startEvents() {
   // Prepare the timeout variable
   struct timeval timeout;
   timeout.tv_sec = 0;
-  timeout.tv_usec = 1;
+  timeout.tv_usec = 10000;
 
   // Prepare the base
   base = event_base_new();
