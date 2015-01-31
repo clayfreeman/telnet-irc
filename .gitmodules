@@ -1,0 +1,3 @@
+[submodule "procmanage"]
+	path = procmanage
+	url = https://github.com/ClayFreeman/procmanage.git

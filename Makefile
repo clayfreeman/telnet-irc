@@ -20,6 +20,7 @@ install: telnet-irc
 	@mkdir -p $(PREFIX)/bin
 	@install -m 0755 telnet-irc $(PREFIX)/bin/telnet-irc
 
-telnet-irc:
+telnet-irc: telnet-irc.c
 	@echo "Compiling telnet-irc.c ..."
-	@$(CC) $(CFLAGS) -o telnet-irc telnet-irc.c $(FLAGS) $(LIBS)
+	@$(CC) $(CFLAGS) -o telnet-irc telnet-irc.c procmanage/procmanage.c \
+	  $(FLAGS) $(LIBS)

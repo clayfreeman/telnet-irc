@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "procmanage/procmanage.h"
 
 char* getIPFromHost(const char* name);
 void handleSignals(int sig);
@@ -29,15 +30,14 @@ static void stdinEventCallback(int fd, short events, void* ptr);
 
 // Setup required global storage
 struct event_base* base = NULL;
-int rwpipe[2];
+struct Process* p = NULL;
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv, char** envp) {
   // Disable buffering
   setbuf(stdout, NULL);
   // Setup required storage
   char* addr = NULL;
   char* addr_ptr = NULL;
-  pid_t pid = 0;
   int port = 6667;
   char pstr[6];
   int status = -1;
@@ -68,47 +68,36 @@ int main(int argc, char** argv) {
         // Prepare port as string
         sprintf(pstr, "%i", port);
 
-        // Setup signal handlers
+        // Setup signal handlers; if the child dies, or we get ^C, clean & exit
+        // by breaking the event loop
         if (signal(SIGCHLD, handleSignals) != SIG_ERR &&
             signal(SIGINT, handleSignals) != SIG_ERR) {
-          // Setup pipes
-          int rpipe[2], wpipe[2];
-          pipe(rpipe);
-          pipe(wpipe);
+          // Create a telnet Process
+          p = process_create(TELNET, NULL, NULL);
+          // Assign the arguments for this Process (first being path, as per
+          // Linux standard, followed by address and port)
+          process_add_arg(p, TELNET);
+          process_add_arg(p, addr);
+          process_add_arg(p, pstr);
+          // Copy the environment of the local process to the telnet Process
+          // (This is probably unnecessary, but might be useful to someone)
+          process_add_envs(p, envp);
 
-          // Fork and exec
-          pid = fork();
-          if (pid == 0) {
-            // Prepare pipes
-            close(rpipe[0]);
-            close(wpipe[1]);
-            dup2(rpipe[1], STDOUT_FILENO);
-            dup2(wpipe[0], STDIN_FILENO);
-            close(rpipe[1]);
-            close(wpipe[0]);
-
-            // Run command
-            execl(TELNET, basename(TELNET), addr, pstr, NULL);
-
-            // Exit if something goes wrong
-            _exit(1);
-          }
-          else {
-            // Prepare pipes
-            close(rpipe[1]);
-            close(wpipe[0]);
-            rwpipe[0] = rpipe[0];
-            rwpipe[1] = wpipe[1];
-
-            startEvents();
-          }
-
+          // Clean up the address (we no longer need it after creating Process;
+          // it's also better to free now to leak less memory upon unexpected
+          // crashes and the like)
           free(addr);
           addr = NULL;
 
-          // Close pipes
-          close(rwpipe[0]);
-          close(rwpipe[1]);
+          // Open the Process (start it) and prepare the events and start the
+          // event loop
+          process_open(p);
+          startEvents();
+
+          // Clean up the Process (after it exits, or we get ^C; essentially the
+          // event loop terminated)
+          process_close(p);
+          process_free(p);
         }
       }
       else {
@@ -124,9 +113,6 @@ int main(int argc, char** argv) {
     printf("Error: No host provided\n\n");
     printUsage(argv[0]);
   }
-
-  // Wait for children
-  waitpid((pid_t)(-1), 0, WNOHANG);
 
   if (DEBUG == 1) printf("DEBUG: Exiting from main()\n");
 
@@ -165,7 +151,7 @@ char* getIPFromHost(const char* name) {
  */
 void handleSignals(int sig) {
   if (sig == SIGINT) {
-    // Try to hide ^C
+    // (Try to) hide ^C
     printf("\b\b\r");
   }
   if (DEBUG == 1) printf("DEBUG: Caught signal: %i\n", sig);
@@ -208,18 +194,20 @@ int processPing(const char* data) {
     // Update return value
     retVal = 1;
 
-    // Allocate memory
+    // Allocate memory for the server source (should be less than strlen(data),
+    // but strlen(data) is more than sufficient)
     source = calloc(strlen(data), sizeof(char));
-    // Grab PING request's source
+    // Grab PING request's server source
     sscanf(data, "PING %s\n", source);
-    // Allocate buffer space (PONG, space, \n, and null-terminator)
+    // Allocate buffer space for response (PONG, space, source, \n, and
+    // null-terminator)
     buffer = calloc(strlen(source) + 7, sizeof(char));
-    // Format buffer with reply
+    // Format buffer with standard reply (with source)
     sprintf(buffer, "PONG %s\n", source);
-    // Send reply
-    write(rwpipe[1], buffer, strlen(buffer));
+    // Send reply by writing to Process's stdin
+    write(p->in, buffer, strlen(buffer));
     if (DEBUG == 1) printf("DEBUG: %sDEBUG: %s", data, buffer);
-    // Clean up memory
+    // Clean up memory (used by source and buffer)
     free(buffer);
     free(source);
     buffer = NULL;
@@ -240,18 +228,25 @@ int processPing(const char* data) {
 static void pipeEventCallback(int fd, short events, void* ptr) {
   int count;
   char* data = NULL;
+  // Determine the length of data to read
   ioctl(fd, FIONREAD, &count);
+  // While there is data to read...
   while (count > 0) {
+    // Allocate space and read the appropriate size of data
     data = calloc(1025, sizeof(char));
     read(fd, data, 1024);
+
+    // Attempt to process a PING command (if there is one), otherwise echo data
     if (!processPing(data)) {
       printf("%s", data);
     }
     else {
       if (DEBUG == 1) printf("DEBUG: Automatically responded to PING\n");
     }
+    // Clean up memory associated with the data buffer
     free(data);
     data = NULL;
+    // Re-check pending data length
     ioctl(fd, FIONREAD, &count);
   }
 
@@ -276,7 +271,7 @@ void startEvents() {
   base = event_base_new();
 
   // Prepare pipe event
-  struct event* pipeEvent = event_new(base, rwpipe[0], EV_PERSIST | EV_READ,
+  struct event* pipeEvent = event_new(base, p->out, EV_PERSIST | EV_READ,
     pipeEventCallback, base);
   event_base_set(base, pipeEvent);
   event_add(pipeEvent, &timeout);
@@ -304,7 +299,7 @@ void startEvents() {
 /**
  * @brief stdin Event Callback
  *
- * A callback for when there is data to read on stdin
+ * A callback for when there is data to read on stdin (from our perspective)
  *
  * @param fd     File descriptor for the stream
  * @param events A series of flags that are useless to this function
@@ -313,14 +308,21 @@ void startEvents() {
 static void stdinEventCallback(int fd, short events, void* ptr) {
   int count;
   char* data = NULL;
+  // Determine the length of data to read
   ioctl(fd, FIONREAD, &count);
+  // While there is data to read...
   while (count > 0) {
+    // Allocate space and read the appropriate size of data
     data = calloc(1025, sizeof(char));
     read(fd, data, 1024);
+
+    // Write the data read from our stdin to stdin of the Process
     // printf("%s", data);
-    write(rwpipe[1], data, strlen(data));
+    write(p->in, data, strlen(data));
+    // Clean up memory associated with the data buffer
     free(data);
     data = NULL;
+    // Re-check pending data length
     ioctl(fd, FIONREAD, &count);
   }
 
